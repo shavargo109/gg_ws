@@ -1,0 +1,7 @@
+image: map_0223_LG2_indoor.pgm
+resolution: 0.050000
+origin: [-23.150000, -22.900000, 0.0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+

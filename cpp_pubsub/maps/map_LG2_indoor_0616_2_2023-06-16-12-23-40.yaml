@@ -1,0 +1,7 @@
+image: map_LG2_indoor_0616_2_2023-06-16-12-23-40.pgm
+resolution: 0.050000
+origin: [-26.750000, -75.249998, 0.0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+
