@@ -20,8 +20,6 @@ class ObstacleExtractor(Node):
         self.odom_ = Odometry()
         self.occupiedCells = []
         self.flag_ = Bool()
-        self.tf_buffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         self.startTime_ = time.time()
         self.endTime_ = 0.
 
@@ -33,12 +31,13 @@ class ObstacleExtractor(Node):
             self.costmapCallback,
             10)
         self.costmap_sub_
+
         # self.globalpath_sub_ = self.create_subscription(
         #     Path, '/plan', self.pathCallback, 10)
         self.globalpath_sub_ = self.create_subscription(
             Path, '/received_global_plan', self.pathCallback, 10)
-
         self.globalpath_sub_
+
         self.odom_sub_ = self.create_subscription(
             Odometry, '/odom', self.odomCallback, 10)
         self.odom_sub_
@@ -50,29 +49,6 @@ class ObstacleExtractor(Node):
         self.odom_ = msg
 
     def costmapCallback(self, msg: OccupancyGrid):
-        # Extract the costmap info
-        # if not self.path_.poses or not self.odom_:
-        #     self.get_logger().info('No global path or odom received!')
-        #     return
-
-        # try:
-        # transform = self.tf_buffer.lookup_transform(
-        #     'map',  # Target frame
-        #     'map',   # Source frame
-        #     rclpy.time.Time(),  # Time at which to get the transform
-        #     timeout=rclpy.duration.Duration(seconds=1.0)
-        # )
-        # Transform the origin of the costmap
-        # origin_pose = PoseStamped()
-        # origin_pose.header.frame_id = 'map'
-        # origin_pose.pose.position.x = msg.info.origin.position.x
-        # origin_pose.pose.position.y = msg.info.origin.position.y
-        # origin_pose.pose.orientation = msg.info.origin.orientation
-
-        # Transform the origin to the odom frame
-        # transformed_origin = tf2_geometry_msgs.do_transform_pose(
-        #     origin_pose.pose, transform)
-
         resolution = msg.info.resolution
         width = msg.info.width
         height = msg.info.height
@@ -112,8 +88,7 @@ class ObstacleExtractor(Node):
                 self.flag_.data = False
             self.objflag_pub_.publish(self.flag_)
             return
-        # print('======================================')
-        # print(origin_x_odom, origin_y_odom)
+
         maxDistance = 2  # lookahead distance from robot along the path
         bufferRadius = 0.1
         bufferCells = math.ceil(bufferRadius / resolution)
