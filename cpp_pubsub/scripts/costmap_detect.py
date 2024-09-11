@@ -62,11 +62,6 @@ class ObstacleExtractor(Node):
             for cell in self.occupiedCells:
                 if (data[cell[0], cell[1]] > 90):
                     stillHere += 1
-                # if (stillHere > 1):
-                #     x = origin_x_odom + cell[1] * resolution
-                #     y = origin_y_odom + cell[0] * resolution
-                #     self.get_logger().info(
-                #         f'Obstacles are still here in {round(x,2)}, {round(y,2)}! ')
                 self.endTime_ = time.time()  # obstacles still here
             if (stillHere == 0):
               # no more occupied cells
@@ -75,13 +70,13 @@ class ObstacleExtractor(Node):
             self.flag_.data = True
 
             holdTime = self.startTime_ - self.endTime_
-            print(f"start time: {self.startTime_}")
-            print(f"end time: {self.endTime_}")
+            # print(f"start time: {self.startTime_}")
+            # print(f"end time: {self.endTime_}")
             print(f"hold time: {holdTime}")
-            if (len(self.occupiedCells) == 0 and 0 < holdTime <= 3.):
+            if (len(self.occupiedCells) == 0 and holdTime <= 2.):
                 self.startTime_ = time.time()
                 self.get_logger().info(
-                    f'All obstacles are removed, holding stop for {round(holdTime,1)}')
+                    f'All obstacles are removed, holding stop for {round(holdTime,1)}/3.0')
 
             # only if holdtime signal is ended and no more occupied cells
             elif (len(self.occupiedCells) == 0):
@@ -90,19 +85,17 @@ class ObstacleExtractor(Node):
             return
 
         maxDistance = 2  # lookahead distance from robot along the path
-        bufferRadius = 0.1
+        bufferRadius = 0.1  # 0.2 for actual robot
         bufferCells = math.ceil(bufferRadius / resolution)
         obstacleCells = 0
 
-        robot_x = self.odom_.pose.pose.position.x
-        robot_y = self.odom_.pose.pose.position.y
-        # robot_grid_x = int((robot_x - origin_x_odom) / resolution)
-        # robot_grid_y = int((robot_y - origin_y_odom) / resolution)
-
         ocCells = []
 
-        # only cal. forward 20 points within maxDistance or not
-        for pose in self.path_.poses[:20]:
+        # The path is updated when the robot pass through.
+        # Therefore, in order to cal. the path starting from the head of robot,
+        # need to chop some point at first [3:30]
+        for pose in self.path_.poses[3:30]:
+            pose: PoseStamped
             posei = math.ceil(
                 (pose.pose.position.y-origin_y_odom)/resolution)
             posej = math.ceil(
@@ -113,7 +106,7 @@ class ObstacleExtractor(Node):
                     if (0 <= celli < height):
                         for cellj in range(posej-bufferCells, posej+bufferCells):
                             if (0 <= cellj < width):
-                                print('celli, cellj:', celli, cellj)
+                                # print('celli, cellj:', celli, cellj)
                                 if (data[celli, cellj] >= 90):
                                     ocCells.append([celli, cellj])
                                     obstacleCells += 1

@@ -237,8 +237,8 @@ class BasicNavigator(Node):
             self.info("'Wait' action server not available, waiting...")
         goal_msg = Wait.Goal()
         goal_msg.time = Duration(sec=duration)
-        self.info(
-            f'Waiting for {goal_msg.time}')
+
+        self.info(f'Waiting for {goal_msg.time}')
         send_goal_future = self.wait_client.send_goal_async(
             goal_msg, self._feedbackCallback)
         rclpy.spin_until_future_complete(self, send_goal_future)
@@ -334,8 +334,8 @@ class BasicNavigator(Node):
                 "'ComputePathToPose' action server not available, waiting...")
 
         goal_msg = ComputePathToPose.Goal()
-        goal_msg.start = start # PoseStamped
-        goal_msg.goal = goal # PoseStamped
+        goal_msg.start = start  # PoseStamped
+        goal_msg.goal = goal  # PoseStamped
         goal_msg.planner_id = planner_id
         goal_msg.use_start = use_start
 
