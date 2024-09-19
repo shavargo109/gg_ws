@@ -1,3 +1,4 @@
 pointcloud_to_laserscan
 cpp_pubsub/scripts/path_from_csv copy.py
 cpp_pubsub/scripts/weee.py
+cpp_pubsub/scripts/obstacle_detect copy.py
