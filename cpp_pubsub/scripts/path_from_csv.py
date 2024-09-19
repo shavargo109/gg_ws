@@ -32,6 +32,7 @@ class PathCsvNode(Node):
         self.isRecievedOdom = bool(False)
         self.path_feedback_pub_ = self.create_publisher(
             String, "task_result", 10)
+        self.goal_pub_ = self.create_publisher(PoseStamped, "fixed_pose", 10)
 
         self.odom_sub_ = self.create_subscription(
             Odometry, "odom", self.odomCallback, 10)
@@ -85,7 +86,7 @@ class PathCsvNode(Node):
             min_index = np.argmin(distances)  # min_index of check[]
             index = self.coordinates.index(check[min_index])
         self.afterCoordinates = self.coordinates[index:]
-        print("first point of the path: ", self.coordinates[index])
+        print("first point of the path: ", self.afterCoordinates[0])
         # print(asd)
         if not self.isNavThroughPoses.value:
             # need to cal. current position to path if it is too far for Followpath()
@@ -103,8 +104,8 @@ class PathCsvNode(Node):
             goal = PoseStamped()
             goal.header.frame_id = "map"
             goal.header.stamp = na.get_clock().now().to_msg()
-            goal.pose.position.x = self.coordinates[index][0]
-            goal.pose.position.y = self.coordinates[index][1]
+            goal.pose.position.x = self.afterCoordinates[0][0]
+            goal.pose.position.y = self.afterCoordinates[0][1]
             goal.pose.orientation.w = 1.
             goal.pose.orientation.z = 0.
             path = na.getPath(start=start, goal=goal)
@@ -123,9 +124,11 @@ class PathCsvNode(Node):
                     continue
                 x, y = map(float, row)
                 coordinates.append((x, y))
-        self.coordinates = coordinates[::2]
-        # must include last point as goal
-        self.coordinates.append(coordinates[-1])
+
+        self.coordinates = coordinates
+        # self.coordinates = coordinates[::2]
+        # # must include last point as goal
+        # self.coordinates.append(coordinates[-1])
 
     def sendPath(self, event):
         if not self.isRecievedOdom:
@@ -141,15 +144,33 @@ class PathCsvNode(Node):
             return
 
         goal_poses = []
-        for coordinate in self.afterCoordinates:
-            coordinate: list
+        # for coordinate in self.afterCoordinates:
+        #     coordinate: list
+        #     goal_pose = PoseStamped()
+        #     goal_pose.header.frame_id = "map"
+        #     goal_pose.header.stamp = navigator.get_clock().now().to_msg()
+        #     goal_pose.pose.position.x = coordinate[0]
+        #     goal_pose.pose.position.y = coordinate[1]
+        #     goal_pose.pose.orientation.z = 0.
+        #     goal_pose.pose.orientation.w = 1.
+        #     goal_poses.append(goal_pose)
+
+        for i in range(len(self.afterCoordinates)-1):  # last data is orientation of goal
             goal_pose = PoseStamped()
-            goal_pose.header.frame_id = "map"
-            goal_pose.header.stamp = navigator.get_clock().now().to_msg()
-            goal_pose.pose.position.x = coordinate[0]
-            goal_pose.pose.position.y = coordinate[1]
-            goal_pose.pose.orientation.z = 0.
-            goal_pose.pose.orientation.w = 1.
+            if i == (len(self.afterCoordinates)-2):
+                goal_pose.header.frame_id = "map"
+                goal_pose.header.stamp = navigator.get_clock().now().to_msg()
+                goal_pose.pose.position.x = self.afterCoordinates[i][0]
+                goal_pose.pose.position.y = self.afterCoordinates[i][1]
+                goal_pose.pose.orientation.z = self.afterCoordinates[i+1][0]
+                goal_pose.pose.orientation.w = self.afterCoordinates[i+1][1]
+            else:
+                goal_pose.header.frame_id = "map"
+                goal_pose.header.stamp = navigator.get_clock().now().to_msg()
+                goal_pose.pose.position.x = self.afterCoordinates[i][0]
+                goal_pose.pose.position.y = self.afterCoordinates[i][1]
+                goal_pose.pose.orientation.z = 0.
+                goal_pose.pose.orientation.w = 1.
             goal_poses.append(goal_pose)
 
         if self.isNavThroughPoses.value:
@@ -158,10 +179,12 @@ class PathCsvNode(Node):
                 goal_poses, behavior_tree=self.behavior_tree)
         else:
             self.get_logger().info("Using FollowPath")
+            navigator.clearGlobalCostmap()
             path_to_path.poses.extend(goal_poses)
             navigator.followPath(path_to_path, controller_id="FollowPath")
             goal_poses = path_to_path.poses  # update poses
 
+        self.goal_pub_.publish(goal_poses[-1])
         while not navigator.isTaskComplete():
             feedback = navigator.getFeedback()
 
