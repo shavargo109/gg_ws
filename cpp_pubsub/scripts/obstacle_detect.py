@@ -2,10 +2,11 @@
 
 import time
 import math
+from enum import Enum
 import rclpy
 import numpy as np
 from rclpy.node import Node
-# from tf_transformations import quaternion_from_euler, euler_from_quaternion
+from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from std_msgs.msg import Bool, Int8
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import PoseStamped, Twist
@@ -18,8 +19,19 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy
     perform action under recovery mode
     self-rotation then parallel moving
 
-    TODO: first rotate, then parallel
+    Flow: if |45|<angle<=|90|, perform rotation then parallel moving
+    if 90<angle<|180|, perform rotation to opposite direction, parallel moving,
+    then rotate back to desired orientation
+    if 0<=angle<=|45|, parallel moving
+
 '''
+
+
+class RecoveryState(Enum):
+    IDLE = 0
+    ROTATING = 1
+    PARALLEL_MOVING = 2
+    ROTATE_BACK = 3
 
 
 class obstacleDetectNode(Node):
@@ -27,18 +39,22 @@ class obstacleDetectNode(Node):
         super().__init__("obstacle_detect_node")
         self.declare_parameter("width", 0.25)
         self.declare_parameter("length", 0.5)
+        self.declare_parameter("angle_tolerance", 0.0556*math.pi)
         self.width_ = self.get_parameter("width")
         self.length_ = self.get_parameter("length")
-        self.speedAll_ = 0.
+        self.tolerance_ = self.get_parameter("angle_tolerance")
+        self.recoveryState_ = RecoveryState.IDLE
         self.globalPath_ = Path()
         self.odom_ = Odometry()
-        self.rotateFlag_ = bool(False)
+        # to check if the initial orientation need to rotate
         self.isfirstTime_ = bool(True)
+        self.isOpposite_ = bool(False)  # to check needed rotate_back
         self.yaw_ = float()
+        self.angle_ = float()
 
         ########### for left right part lidar detection #########
         self.thetaRight_ = math.floor(
-            math.atan(0.3/1.0)*180/3.141592654)
+            math.atan(0.3/1.0)*180/math.pi)
         self.rectDetectRight_ = []
         for i in range(90):
             if (i <= self.thetaRight_):
@@ -49,44 +65,13 @@ class obstacleDetectNode(Node):
                 self.rectDetectRight_.append(dist)
         self.rectDetectLeft_ = self.rectDetectRight_.copy()
         self.rectDetectLeft_.reverse()
-        print(self.thetaRight_)
-        print(len(self.rectDetectLeft_), len(self.rectDetectRight_))
-        print(self.rectDetectLeft_)
         #########################################################
-
-        theta = math.ceil(
-            math.atan(self.length_.value/self.width_.value)*180/3.141592654)
-        self.rectDetect_ = []
-        self.startTime_ = time.time()
-        self.endTime_ = 0.
-        self.previousDetect_ = [False]*180
-        self.isObstacle_ = bool(False)
-        self.previousDist_ = [0]*180
-        timer_period = 0.1
-        self.timer_ = self.create_timer(timer_period, self.asddw)
 
         qos = QoSProfile(
             depth=10,
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             durability=QoSDurabilityPolicy.VOLATILE)
 
-        # compute a list of detected range within the rectangle from 0 to 90 and 270 to 360
-        for i in range(90):
-            if (i <= theta):
-                dist = self.length_.value/math.cos(math.radians(i))
-                self.rectDetect_.append(dist)
-            elif (i > theta):
-                dist = self.width_.value/math.sin(math.radians(i))
-                self.rectDetect_.append(dist)
-        copy = self.rectDetect_.copy()
-        self.rectDetect_.reverse()
-        self.rectDetect_.extend(copy)
-        # print(len(self.rectDetect_))
-        # print(self.rectDetect_)
-
-        # pub cmd to vel_smooth node for overall cmd pub
-        # self.obj_pub_ = self.create_publisher(Bool, "/object_detected", 10)
-        self.obsFront_pub_ = self.create_publisher(Int8, "/obstacle_msgs", 10)
         self.obsRight_pub_ = self.create_publisher(
             Int8, "/obstacle_R_msgs", 10)
         self.obsLeft_pub_ = self.create_publisher(Int8, "/obstacle_L_msgs", 10)
@@ -98,8 +83,6 @@ class obstacleDetectNode(Node):
         # actual robot topic
         self.laser_sub_ = self.create_subscription(
             LaserScan, "/scanner/scansd", self.laserCallback, qos)
-        # self.laser_sub_ = self.create_subscription(
-        #     LaserScan, "/scan", self.laserCallback, qos)
         self.laser_sub_
         self.globalpath_sub_ = self.create_subscription(
             Path, "/received_global_plan", self.pathCallback, 10)
@@ -114,57 +97,85 @@ class obstacleDetectNode(Node):
             Twist, "cmd_vel_tc", self.angleCallback, 10)
         self.angle_sub_
 
-    def angleCallback(self, msg: Twist):
-        # all cal. in radian
-        if self.rotateFlag_:
-            pi = 3.141592654
-            # orientation_list = [msg.pose.pose.orientation.x, msg.pose.pose.orientation.y,
-            #                     msg.pose.pose.orientation.z,
-            #                     msg.pose.pose.orientation.w]
-            # (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
-            delta = msg.angular.z-self.yaw_
-            # delta = yaw-self.yaw_
-            print("yaw: ", self.yaw_)
-            print("angle: ", msg.angular.z)
-
-            if self.isfirstTime_:
-                if (abs(delta) < abs(0.25*pi)):
-                    print("Angle is too small, no need to self-rotate")
-                    self.rotateFlag_ = False
-                    return
-                self.isfirstTime_ = False
-
-            # should rotate in reverse direction if delta is larger than 180 deg
-            if delta > pi:
-                delta = delta-2*pi
-            elif delta < -pi:
-                delta = delta+2*pi
-
-            if not self.keepRotating(delta):
-                self.rotateFlag_ = False
-
     def pathCallback(self, msg: Path):
         self.globalPath_ = msg
 
     def recoverCallback(self, msg: Bool):
-        self.angleAdjust()
+        if msg.data and self.recoveryState_ == RecoveryState.IDLE:
+            self.angleAdjust()
+        elif not msg.data:
+            print("Received wrong data to enter recovery mode")
+        else:
+            print("Previous rotation is processing...")
 
-    def odomCallback(self, data: Odometry):
-        self.odom_ = data
+    def odomCallback(self, msg: Odometry):
+        self.odom_ = msg
 
-    def laserCallback(self, data: LaserScan):
-        # when >=3 laserscan data has obstacle, set flag
-        ######### simulation ##########
-        # rangeDetectRaw = data.ra/nges[0:90]
-        # rangeDetectRaw.extend(data.ranges[270:360])
-        ###############################
+    def angleCallback(self, msg: Twist):
+        # all cal. in radian
+        if self.recoveryState_ == RecoveryState.ROTATING:
+            self.handleRotation(msg)
+        elif self.recoveryState_ == RecoveryState.ROTATE_BACK:
+            self.handleRotationBack(msg)
+
+    def laserCallback(self, msg: LaserScan):
+        if self.recoveryState_ == RecoveryState.PARALLEL_MOVING:
+            self.handleParallelMoving(msg)
+
+    def handleRotation(self, msg: Twist):
+        delta = msg.angular.z-self.yaw_
+        self.angle_ = msg.angular.z
+        print("yaw: ", self.yaw_)
+        print("angle: ", msg.angular.z)
+
+        if self.isfirstTime_:
+            if abs(delta) < abs(0.25*math.pi):
+                print("Angle is too small, no need to self-rotate")
+                self.recoveryState_ = RecoveryState.PARALLEL_MOVING
+                return
+            elif abs(delta) > abs(0.5*math.pi):
+                print("Angle > 90, performing opposite rotation")
+                self.yaw_ = self.yaw_+math.pi
+                delta = msg.angular.z-self.yaw_
+                # delta = yaw-self.yaw_
+                self.isOpposite_ = True
+            self.isfirstTime_ = False
+
+        # should rotate in reverse direction if delta is larger than 180 deg
+        if delta > math.pi:
+            delta = delta-2*math.pi
+        elif delta < -math.pi:
+            delta = delta+2*math.pi
+
+        if not self.keepRotating(delta):
+            self.recoveryState_ = RecoveryState.PARALLEL_MOVING
+
+    def handleRotationBack(self, msg: Twist):
+        self.yaw_ = self.yaw_-math.pi
+        delta = msg.angular.z-self.yaw_
+        self.angle_ = msg.angular.z
+        print("yaw: ", self.yaw_)
+        print("angle: ", msg.angular.z)
+
+        # should rotate in reverse direction if delta is larger than 180 deg
+        if delta > math.pi:
+            delta = delta-2*math.pi
+        elif delta < -math.pi:
+            delta = delta+2*math.pi
+
+        if not self.keepRotating(delta):
+            self.get_logger().info("All actions are completed 2")
+            self.recoveryState_ = RecoveryState.IDLE
+            self.isfirstTime_ = True
+            self.isOpposite_ = False
+            self.turnRight_pub_.publish(Int8(data=0))
+            self.turnLeft_pub_.publish(Int8(data=0))
+
+    def handleParallelMoving(self, msg: LaserScan):
         # anticlockwise
-        rangeDetectRaw = data.ranges[90:270]  # actual robot
+        rangeDetectRaw = msg.ranges[90:270]  # actual robot
         # print(rangeDetectRaw)
-        no = 0
-        asd = 0
-        asDetect = [False]*180
-        self.speedAll_ = 0.
+
         for i in range(90):
             leftMsg = Int8()
             rightMsg = Int8()
@@ -179,71 +190,55 @@ class obstacleDetectNode(Node):
                 # print("left ", 90+i, rangeDetectRaw[90+i])
         self.obsRight_pub_.publish(rightMsg)
         self.obsLeft_pub_.publish(leftMsg)
-
-        for i in range(180):
-            if (rangeDetectRaw[i] <= self.rectDetect_[i]):
-                # print(str(i)+" " +str(rangeDetectRaw[i])+" "+str(self.rectDetect_[i]))
-                asDetect[i] = True
-                # 0.2 = rate of data
-                speed = (self.previousDist_[i]-rangeDetectRaw[i])/0.2
-                self.speedAll_ += speed
-                asd += 1
-                # print("speed:", speed)
-                if (asDetect[i] == self.previousDetect_[i] == True):
-                    no += 1
-        if (asd != 0):
-            # print("speed ", self.speedAll_/asd)
-            pass
-        if (no >= 3):
-            self.isObstacle_ = True
-        else:
-            self.isObstacle_ = False
-        self.previousDetect_ = asDetect.copy()
-        self.previousDist_ = rangeDetectRaw[:]
-        # print(str(no)+" "+str(self.isObstacle_))
+        if leftMsg.data == rightMsg.data == 0 or (leftMsg.data == 1 and rightMsg.data == 2):
+            print("Parallel moving completed")
+            if not self.isOpposite_:
+                # All actions are done, reset all flags
+                self.get_logger().info("All actions are completed 1")
+                self.recoveryState_ = RecoveryState.IDLE
+                self.isfirstTime_ = True
+                self.isOpposite_ = False
+                self.turnRight_pub_.publish(Int8(data=0))
+                self.turnLeft_pub_.publish(Int8(data=0))
+            elif self.isOpposite_:
+                self.recoveryState_ = RecoveryState.ROTATE_BACK
 
     def angleAdjust(self):
-        if self.rotateFlag_:
-            print("Previous rotation is processing...")
+        if self.globalPath_ == Path():
+            print("Not yet recieved path...")
             return
+
         distance = self.shortestPoint()
-        if distance == None:
-            print("")
         self.yaw_ = math.atan2(distance[1][1]-distance[0][1],
                                distance[1][0]-distance[0][0])
-        self.rotateFlag_ = True
-        # q = quaternion_from_euler(0., 0., yaw)
-        # imu = Imu()
-        # imu.orientation.x = q[0]
-        # imu.orientation.y = q[1]
-        # imu.orientation.z = q[2]
-        # imu.orientation.w = q[3]
+        self.recoveryState_ = RecoveryState.ROTATING
 
-    def keepRotating(self, delta: float, pi: float = 3.141592654):
-        ######################################
+    def keepRotating(self, delta: float):
+        ########################################################
         # delta is -ve, rotate clockwise
         # delta is +ve, rotate anticlockwise
 
-        # p.s. somehow the +ve direction in simulation is anticlockwise,
-        # so the above direction need to be reversed
-        ######################################
+        # p.s.the +ve direction in simulation is anticlockwise,
+        ########################################################
 
-        # publish signal topic here
-        if abs(delta) < abs(0.05556*pi):
+        # publish rotation signal topic here
+        dataLeft = 0
+        dataRight = 0
+        if abs(delta) < abs(self.tolerance_.value):
             print("Current orientation is within tolerance, self-rotation is completed")
-            self.isfirstTime_ = True
-            # reset
-            self.turnRight_pub_.publish(Int8(data=0))
-            self.turnLeft_pub_.publish(Int8(data=0))
+            # reset to non-zero data to prevent false resume
+            self.turnRight_pub_.publish(Int8(data=7))
+            self.turnLeft_pub_.publish(Int8(data=7))
             return False
         elif delta > 0:
             print("Rotating clockwise...")
-            self.turnRight_pub_.publish(Int8(data=6))
-            self.turnLeft_pub_.publish(Int8(data=0))
+            dataRight = 6
         elif delta < 0:
             print("Rotating anticlockwise...")
-            self.turnLeft_pub_.publish(Int8(data=5))
-            self.turnRight_pub_.publish(Int8(data=0))
+            dataLeft = 5
+
+        self.turnRight_pub_.publish(Int8(data=dataRight))
+        self.turnLeft_pub_.publish(Int8(data=dataLeft))
         return True
 
     def shortestPoint(self):
@@ -278,29 +273,6 @@ class obstacleDetectNode(Node):
         anglepath.append(coordinates[index])
         anglepath.append(coordinates[index+3])
         return anglepath
-
-    def asddw(self):  # if flag holds true for 1s, publish stop cmd
-        asd = Int8()
-        if (not self.isObstacle_):
-            self.startTime_ = time.time()
-            holdTime = self.startTime_ - self.endTime_
-
-            if (holdTime <= 3.):
-                # print("obstacles removed, holding stop signal for", holdTime)
-                asd.data = 3
-                self.obsFront_pub_.publish(asd)
-            else:
-                # print("nothing")
-                asd.data = 0
-                self.obsFront_pub_.publish(asd)
-        else:
-            self.endTime_ = time.time()
-            obstacleTime = self.endTime_ - self.startTime_
-            # print("Obstacle time:", obstacleTime)
-            if (obstacleTime >= 1.):
-                # print("obstacles detected, sending stop cmd to vel_smooth_node")
-                asd.data = 3
-                self.obsFront_pub_.publish(asd)
 
 
 def ouob(args=None):
