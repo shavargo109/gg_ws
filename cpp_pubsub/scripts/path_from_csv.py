@@ -5,7 +5,7 @@ import csv
 import numpy as np
 from nav_msgs.msg import Path, Odometry
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import String, Bool
+from std_msgs.msg import String, Bool, Int8
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from scipy.spatial.distance import euclidean
 
@@ -27,7 +27,8 @@ class PathCsvNode(Node):
         self.coordinates = []
         self.afterCoordinates = []
         self.odom = Odometry()
-
+        self.objflag_ = bool()
+        self.mode_ = int()
         self.isRecievedOdom = bool(False)
         self.path_feedback_pub_ = self.create_publisher(
             String, "task_result", 10)
@@ -38,6 +39,16 @@ class PathCsvNode(Node):
         self.go_sub_ = self.create_subscription(
             Bool, "fixed_path_signal", self.fixedPathSignalCallback, 10)
         self.go_sub_
+        self.objflag_sub_ = self.create_subscription(
+            Bool, "/object_detected", self.objflagCallback, 10)
+        self.mode_sub_ = self.create_subscription(
+            Int8, "/mode", self.modeCallback, 10)
+
+    def objflagCallback(self, msg: Bool):
+        self.objflag_ = msg.data
+
+    def modeCallback(self, msg: Int8):
+        self.mode_ = msg.data
 
     def odomCallback(self, data: Odometry):
         self.odom = data
@@ -149,6 +160,7 @@ class PathCsvNode(Node):
             self.get_logger().info("Using FollowPath")
             path_to_path.poses.extend(goal_poses)
             navigator.followPath(path_to_path, controller_id="FollowPath")
+            goal_poses = path_to_path.poses  # update poses
 
         while not navigator.isTaskComplete():
             feedback = navigator.getFeedback()
@@ -157,7 +169,8 @@ class PathCsvNode(Node):
         task_result = String()
 
         if not self.isNavThroughPoses.value:
-            while result == TaskResult.FAILED:
+            # only handle task failed due to obstacle detected or controller in idle mode
+            while result == TaskResult.FAILED and (self.objflag_ or self.mode_ == 0):
                 self.get_logger().info("FollowPath failed, sending path again...")
                 path = Path()
                 path.header.frame_id = "map"
