@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 import time
 import rclpy
-import tf2_ros
-import tf2_geometry_msgs
 from rclpy.node import Node
 from std_msgs.msg import Bool
 from nav_msgs.msg import OccupancyGrid, Path, Odometry
-from geometry_msgs.msg import PoseStamped, Pose
+from geometry_msgs.msg import PoseStamped
 import numpy as np
 import math
 
 
 class ObstacleExtractor(Node):
     def __init__(self):
-        super().__init__('obstacle_extractor')
+        super().__init__("obstacle_extractor")
 
         self.costmap_ = OccupancyGrid()
         self.path_ = Path()
@@ -22,24 +20,22 @@ class ObstacleExtractor(Node):
         self.flag_ = Bool()
         self.startTime_ = time.time()
         self.endTime_ = 0.
+        self.costmapCoordinates_ = [0, 0]
 
-        self.objflag_pub_ = self.create_publisher(Bool, '/object_detected', 10)
+        self.objflag_pub_ = self.create_publisher(Bool, "/object_detected", 10)
 
         self.costmap_sub_ = self.create_subscription(
-            OccupancyGrid,
-            '/local_costmap/costmap',
-            self.costmapCallback,
-            10)
+            OccupancyGrid, "/local_costmap/costmap", self.costmapCallback, 10)
         self.costmap_sub_
 
         # self.globalpath_sub_ = self.create_subscription(
-        #     Path, '/plan', self.pathCallback, 10)
+        #     Path, "/plan", self.pathCallback, 10)
         self.globalpath_sub_ = self.create_subscription(
-            Path, '/received_global_plan', self.pathCallback, 10)
+            Path, "/received_global_plan", self.pathCallback, 10)
         self.globalpath_sub_
 
         self.odom_sub_ = self.create_subscription(
-            Odometry, '/odom', self.odomCallback, 10)
+            Odometry, "/odom", self.odomCallback, 10)
         self.odom_sub_
 
     def pathCallback(self, msg: Path):
@@ -49,6 +45,35 @@ class ObstacleExtractor(Node):
         self.odom_ = msg
 
     def costmapCallback(self, msg: OccupancyGrid):
+        origin_x_odom = msg.info.origin.position.x
+        origin_y_odom = msg.info.origin.position.y
+
+        dist = math.dist([origin_x_odom, origin_y_odom], [
+            self.costmapCoordinates_[0], self.costmapCoordinates_[1]])
+        if dist >= 0.5:
+            self.occupiedCells = []
+            self.get_logger().info(
+                f"Unstable localization detected, jumped {round(dist,1)}m")
+            self.costmapCoordinates_ = [origin_x_odom, origin_y_odom]
+            return
+        self.costmapCoordinates_ = [origin_x_odom, origin_y_odom]
+        self.detectObstacle(msg)
+        ############### costmap checking ####################
+        # data = np.array(msg.data).reshape((height, width))
+
+        # # Print the coordinates of occupied cells
+        # for i in range(height):
+        #     for j in range(width):
+        #         if data[i, j] > 0:  # Assuming >0 indicates an obstacle or relevant feature
+        #             # Calculate the world coordinates of this cell
+        #             x = origin_x_odom + j * resolution
+        #             y = origin_y_odom + i * resolution
+        #             print(
+        #                 f"Occupied cell at ({x}, {y}) with value {data[i, j]}")
+        # except tf2_ros.TransformException as ex:
+        #     self.get_logger().warn(f"Could not transform costmap origin: {ex}")
+
+    def detectObstacle(self, msg: OccupancyGrid):
         resolution = msg.info.resolution
         width = msg.info.width
         height = msg.info.height
@@ -64,8 +89,8 @@ class ObstacleExtractor(Node):
                     stillHere += 1
                 self.endTime_ = time.time()  # obstacles still here
             if (stillHere == 0):
-              # no more occupied cells
-                self.get_logger().info('No more obstacle!')
+                # no more occupied cells
+                self.get_logger().info("No more obstacle!")
                 self.occupiedCells = []  # reset
             self.flag_.data = True
 
@@ -76,7 +101,7 @@ class ObstacleExtractor(Node):
             if (len(self.occupiedCells) == 0 and holdTime <= 2.):
                 self.startTime_ = time.time()
                 self.get_logger().info(
-                    f'All obstacles are removed, holding stop for {round(holdTime,1)}/3.0')
+                    f"All obstacles are removed, holding stop for {round(holdTime,1)}/3.0")
 
             # only if holdtime signal is ended and no more occupied cells
             elif (len(self.occupiedCells) == 0):
@@ -106,7 +131,7 @@ class ObstacleExtractor(Node):
                     if (0 <= celli < height):
                         for cellj in range(posej-bufferCells, posej+bufferCells):
                             if (0 <= cellj < width):
-                                # print('celli, cellj:', celli, cellj)
+                                # print("celli, cellj:", celli, cellj)
                                 if (data[celli, cellj] >= 90):
                                     ocCells.append([celli, cellj])
                                     obstacleCells += 1
@@ -122,21 +147,6 @@ class ObstacleExtractor(Node):
             self.get_logger().info("Obstacle detected, sending stop cmd")
         self.objflag_pub_.publish(self.flag_)
 
-        ############### costmap checking ####################
-        # data = np.array(msg.data).reshape((height, width))
-
-        # # Print the coordinates of occupied cells
-        # for i in range(height):
-        #     for j in range(width):
-        #         if data[i, j] > 0:  # Assuming >0 indicates an obstacle or relevant feature
-        #             # Calculate the world coordinates of this cell
-        #             x = origin_x_odom + j * resolution
-        #             y = origin_y_odom + i * resolution
-        #             print(
-        #                 f"Occupied cell at ({x}, {y}) with value {data[i, j]}")
-        # except tf2_ros.TransformException as ex:
-        #     self.get_logger().warn(f"Could not transform costmap origin: {ex}")
-
 
 def ouob(args=None):
     rclpy.init(args=args)
@@ -146,5 +156,5 @@ def ouob(args=None):
     rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     ouob()
