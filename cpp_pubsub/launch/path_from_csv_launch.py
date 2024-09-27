@@ -8,15 +8,19 @@ def generate_launch_description():
 
     # change all params here
 
-    declare_save_path_filename = prefix+'path/' + '123.csv'
+    declare_prefix = prefix
+    declare_save_path_filename = 'path/' + '123.csv'
     declare_yaml_path = prefix + 'maps/' + 'map.yaml'
-    declare_isNavThroughPoses = bool(True)
+    declare_isNavThroughPoses = bool(False)
+    declare_loggingPrefix = "distance_log/"
     path_from_csv_node = Node(
         package='cpp_pubsub',
         executable='path_from_csv.py',
         parameters=[
+            {'prefix': declare_prefix},
             {'save_path_filename': declare_save_path_filename},
             {'isNavThroughPoses': declare_isNavThroughPoses},
+            {"loggingPrefix", declare_loggingPrefix},
         ],
         output='screen',
         emulate_tty=True,  # show print() in terminal
