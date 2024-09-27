@@ -50,7 +50,7 @@ class ObstacleExtractor(Node):
 
         dist = math.dist([origin_x_odom, origin_y_odom], [
             self.costmapCoordinates_[0], self.costmapCoordinates_[1]])
-        if dist >= 0.5:
+        if dist > 0.5:
             self.occupiedCells = []
             self.get_logger().info(
                 f"Unstable localization detected, jumped {round(dist,1)}m")
@@ -58,20 +58,6 @@ class ObstacleExtractor(Node):
             return
         self.costmapCoordinates_ = [origin_x_odom, origin_y_odom]
         self.detectObstacle(msg)
-        ############### costmap checking ####################
-        # data = np.array(msg.data).reshape((height, width))
-
-        # # Print the coordinates of occupied cells
-        # for i in range(height):
-        #     for j in range(width):
-        #         if data[i, j] > 0:  # Assuming >0 indicates an obstacle or relevant feature
-        #             # Calculate the world coordinates of this cell
-        #             x = origin_x_odom + j * resolution
-        #             y = origin_y_odom + i * resolution
-        #             print(
-        #                 f"Occupied cell at ({x}, {y}) with value {data[i, j]}")
-        # except tf2_ros.TransformException as ex:
-        #     self.get_logger().warn(f"Could not transform costmap origin: {ex}")
 
     def detectObstacle(self, msg: OccupancyGrid):
         resolution = msg.info.resolution
@@ -90,18 +76,16 @@ class ObstacleExtractor(Node):
                 self.endTime_ = time.time()  # obstacles still here
             if (stillHere == 0):
                 # no more occupied cells
-                self.get_logger().info("No more obstacle!")
+                print("No more obstacle!")
                 self.occupiedCells = []  # reset
             self.flag_.data = True
 
             holdTime = self.startTime_ - self.endTime_
-            # print(f"start time: {self.startTime_}")
-            # print(f"end time: {self.endTime_}")
             print(f"hold time: {holdTime}")
             if (len(self.occupiedCells) == 0 and holdTime <= 2.):
                 self.startTime_ = time.time()
                 self.get_logger().info(
-                    f"All obstacles are removed, holding stop for {round(holdTime,1)}/3.0")
+                    f"All obstacles are removed, holding stop for {round(holdTime,1)}/2.0")
 
             # only if holdtime signal is ended and no more occupied cells
             elif (len(self.occupiedCells) == 0):
@@ -110,7 +94,7 @@ class ObstacleExtractor(Node):
             return
 
         maxDistance = 2  # lookahead distance from robot along the path
-        bufferRadius = 0.1  # 0.2 for actual robot
+        bufferRadius = 0.2  # 0.2 for actual robot
         bufferCells = math.ceil(bufferRadius / resolution)
         obstacleCells = 0
 
@@ -141,7 +125,7 @@ class ObstacleExtractor(Node):
                                         f"Occupied cell at ({round(x,2)}, {round(y,2)}) on path point {round(pose.pose.position.x,2)},{round(pose.pose.position.y,2)}")
 
         self.flag_.data = obstacleCells > 3
-        if (obstacleCells > 3):
+        if (self.flag_.data):
             self.endTime_ = time.time()  # detected obstacle
             self.occupiedCells = ocCells
             self.get_logger().info("Obstacle detected, sending stop cmd")
