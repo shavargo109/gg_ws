@@ -21,24 +21,27 @@ from datetime import datetime
 class PathCsvNode(Node):
     def __init__(self):
         super().__init__("path_from_csv_node")
-        self.declare_parameter("save_path_filename",
-                               "/home/asd/gg_ws/src/cpp_pubsub/path/map3.csv")
+        self.declare_parameter("prefix", "/home/asd/gg_ws/src/cpp_pubsub/")
+        self.declare_parameter("save_path_filename", "path/map3.csv")
         self.declare_parameter("isNavThroughPoses", False)
-        self.declare_parameter(
-            "loggingPrefix", "/home/tc4801/asd2_ws/src/cpp_pubsub/distance_log/")
+        self.declare_parameter("loggingPrefix", "distance_log/")
+        self.prefix_ = self.get_parameter("prefix")
         self.save_path_filename = self.get_parameter("save_path_filename")
         self.isNavThroughPoses = self.get_parameter("isNavThroughPoses")
         self.loggingPrefix = self.get_parameter("loggingPrefix")
+
         self.behavior_tree = "/home/asd/gg_ws/src/cpp_pubsub/bt_config/custom_nav_through_poses.xml"
         self.coordinates = []
         self.afterCoordinates = []
-        self.originCoordinates = []
         self.angle_ = []
         self.odom = Odometry()
         self.objflag_ = bool()
         self.mode_ = int()
+        self.range_ = 2.
         self.currentAngle_ = float()
         self.isRecievedOdom = bool(False)
+        self.startTime_ = datetime.now()
+
         self.path_feedback_pub_ = self.create_publisher(
             String, "task_result", 10)
         self.goal_pub_ = self.create_publisher(PoseStamped, "fixed_pose", 10)
@@ -47,7 +50,6 @@ class PathCsvNode(Node):
             Odometry, "odom", self.odomCallback, 10)
         self.go_sub_ = self.create_subscription(
             Bool, "fixed_path_signal", self.fixedPathSignalCallback, 10)
-        self.go_sub_
         self.objflag_sub_ = self.create_subscription(
             Bool, "/object_detected", self.objflagCallback, 10)
         self.mode_sub_ = self.create_subscription(
@@ -84,19 +86,21 @@ class PathCsvNode(Node):
         self.recordDistance(pathLength)
 
     def recordDistance(self, distance: float):
-        filepath = self.loggingPrefix.value+datetime.now().strftime("%d-%m-%Y")+".csv"
+        filepath = self.prefix_.value + self.loggingPrefix.value + \
+            datetime.now().strftime("%d-%m-%Y")+".csv"
         with open(filepath, mode='a') as f:
             writer = csv.writer(
                 f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            writer.writerow([distance])
+            writer.writerow([self.startTime_.strftime(
+                "%d-%m-%Y, %H:%M:%S"), datetime.now().strftime(
+                "%d-%m-%Y, %H:%M:%S"), distance])
 
     def _shortest_list(self):
         check = []
         index = int()
-        range = 2.
         for coordinate in self.coordinates:
-            if (self.odom.pose.pose.position.x-range <= coordinate[0] <= self.odom.pose.pose.position.x+range and
-                    self.odom.pose.pose.position.y-range <= coordinate[1] <= self.odom.pose.pose.position.y+range):
+            if (self.odom.pose.pose.position.x-self.range_ <= coordinate[0] <= self.odom.pose.pose.position.x+self.range_ and
+                    self.odom.pose.pose.position.y-self.range_ <= coordinate[1] <= self.odom.pose.pose.position.y+self.range_):
                 check.append(coordinate)
 
         asd = [self.odom.pose.pose.position.x, self.odom.pose.pose.position.y]
@@ -125,10 +129,9 @@ class PathCsvNode(Node):
         return False
 
     def shortestPath(self):
-        range = 2.
         if self._shortest_list() == False:
             self.get_logger().info(
-                f"Robot's current position is too far from the path! (>{range}m), path will not be published!")
+                f"Robot's current position is too far from the path! (>{self.range_}m), path will not be published!")
             return False
         if not self.isNavThroughPoses.value:
             # need to cal. current position to path if it is too far for Followpath()
@@ -175,8 +178,8 @@ class PathCsvNode(Node):
             self.goal_pub_.publish(pose)
 
     def readPath(self):
-        filepath = self.save_path_filename.value
-        self.originCoordinates = []
+        filepath = self.prefix_.value + self.save_path_filename.value
+        originCoordinates = []
         with open(filepath, mode="r") as f:
             reader = csv.reader(f, delimiter=",")
             for row in reader:
@@ -184,11 +187,12 @@ class PathCsvNode(Node):
                 if row == ["x", "y"]:
                     continue
                 x, y = map(float, row)
-                self.originCoordinates.append((x, y))
+                originCoordinates.append((x, y))
 
-        self.angle_ = self.originCoordinates[-1]
-        self.originCoordinates.pop()  # remove angle data
-        self.coordinates = self.originCoordinates[::2]
+        self.angle_ = originCoordinates[-1]
+        print(self.angle_)
+        originCoordinates.pop()  # remove angle data
+        self.coordinates = originCoordinates[::2]
         # # must include last point as goal
         # self.coordinates.append(coordinates[-1])
 
@@ -206,26 +210,16 @@ class PathCsvNode(Node):
             return
 
         goal_poses = []
-        # for coordinate in self.afterCoordinates:
-        #     coordinate: list
-        #     goal_pose = PoseStamped()
-        #     goal_pose.header.frame_id = "map"
-        #     goal_pose.header.stamp = navigator.get_clock().now().to_msg()
-        #     goal_pose.pose.position.x = coordinate[0]
-        #     goal_pose.pose.position.y = coordinate[1]
-        #     goal_pose.pose.orientation.z = 0.
-        #     goal_pose.pose.orientation.w = 1.
-        #     goal_poses.append(goal_pose)
-
         for i in range(len(self.afterCoordinates)-1):
             goal_pose = PoseStamped()
-            if i == (len(self.afterCoordinates)-1):
+            if i == (len(self.afterCoordinates)-2):
                 goal_pose.header.frame_id = "map"
                 goal_pose.header.stamp = navigator.get_clock().now().to_msg()
                 goal_pose.pose.position.x = self.afterCoordinates[i][0]
                 goal_pose.pose.position.y = self.afterCoordinates[i][1]
                 goal_pose.pose.orientation.z = self.angle_[0]
                 goal_pose.pose.orientation.w = self.angle_[1]
+                self.goal_pub_.publish(goal_pose)
             else:
                 goal_pose.header.frame_id = "map"
                 goal_pose.header.stamp = navigator.get_clock().now().to_msg()
@@ -238,7 +232,7 @@ class PathCsvNode(Node):
         navigator.clearGlobalCostmap()
 
         # self.angleAdjust()  # maybe need some feedback to know it is ended or not
-
+        self.startTime_ = datetime.now()
         if self.isNavThroughPoses.value:
             self.get_logger().info("Using NavThroughPoses")
             navigator.goThroughPoses(
@@ -251,7 +245,6 @@ class PathCsvNode(Node):
             goal_poses = path_to_path.poses  # update poses
 
         # publish end goal for adjusting orientation
-        self.goal_pub_.publish(goal_poses[-1])
 
         while not navigator.isTaskComplete():
             feedback = navigator.getFeedback()
