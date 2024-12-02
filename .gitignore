@@ -2,3 +2,16 @@ pointcloud_to_laserscan
 cpp_pubsub/scripts/path_from_csv copy.py
 cpp_pubsub/scripts/weee.py
 cpp_pubsub/scripts/obstacle_detect copy.py
+cpp_pubsub/distance_log/*
+cpp_pubsub/path/*
+cpp_pubsub/maps/*
+cpp_pubsub/src/asd.cpp
+cpp_pubsub/src/pub.cpp
+
+cpp_pubsub/launch/get_map_path_launch.py
+cpp_pubsub/scripts/path_from_csv_old.py
+cpp_pubsub/scripts/weee.py
+cpp_pubsub/maps/map_0223_LG2_indoor.png
+cpp_pubsub/path/map_0223_LG2_indoor.csv
+cpp_pubsub/path/map3.csv
+cpp_pubsub/scripts/sub.py
