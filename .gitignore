@@ -5,6 +5,8 @@ cpp_pubsub/scripts/obstacle_detect copy.py
 cpp_pubsub/distance_log/*
 cpp_pubsub/path/*
 cpp_pubsub/maps/*
+chatbot/*
+autodock/*
 cpp_pubsub/src/asd.cpp
 cpp_pubsub/src/pub.cpp
 
