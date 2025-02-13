@@ -11,8 +11,10 @@ class VelocitySmootherNode(Node):
         super().__init__('vel_smoother_node')
 
         self.target_velocity_ = Twist()
+        self.backward_velocity_ = Twist()
         self.mode_ = int()
         self.obj_flag_ = bool()
+        self.bkwd_flag_ = bool()
         self.smooth_factor_ = 0.05  # Adjust smoothing factor as needed
 
         self.current_velocity_ = Twist()
@@ -45,9 +47,17 @@ class VelocitySmootherNode(Node):
             Bool, 'object_detected', self.cmd_vel_object_callback, 10)
         self.cmd_vel_object_sub_
 
+        self.bkwd_sub_ = self.create_subscription(
+            Bool, 'need_backward', self.bkwd_callback, 10)
+        self.bkwd_sub_
+
         self.mode_sub_ = self.create_subscription(
             Int16, 'mode', self.mode_callback, 10)
         self.mode_sub_
+
+        self.cmd_vel_backward_sub_ = self.create_subscription(
+            Twist, 'cmd_vel_backward', self.cmd_vel_backward_callback, 10)
+        self.cmd_vel_backward_sub_
 
         self.cmd_vel_pub_ = self.create_publisher(Twist, 'cmd_vel', 10)
 
@@ -63,18 +73,29 @@ class VelocitySmootherNode(Node):
             print("Goal reached, sending stop command!")
             self.cmd_vel_pub_.publish(cmd_vel)
 
+    def cmd_vel_backward_callback(self, data: Twist):
+        self.backward_velocity_ = data
+
     def raw_cmd_vel_callback(self, data: Twist):
         self.target_velocity_ = data
+        # self.cmd_vel_pub_.publish(data)
 
     def cmd_vel_object_callback(self, data: Bool):
         self.obj_flag_ = data.data
+
+    def bkwd_callback(self, data: Bool):
+        self.bkwd_flag_ = data.data
 
     def mode_callback(self, data: Int16):
         self.mode_ = data.data
 
     def smooth_velocity(self):
         # if (self.mode_ == 2 and not self.obj_flag_):
-        if (not self.obj_flag_):
+        if self.bkwd_flag_:
+            self.cmd_vel_pub_.publish(self.backward_velocity_)
+            print("Received bkwd vel from costmap detect, First priority!")
+            return
+        elif (not self.obj_flag_):
             # print('xd')
             if (self.target_velocity_.linear.x > 0.5):
                 # cap the vel at 0.5
@@ -88,10 +109,10 @@ class VelocitySmootherNode(Node):
                 # need smoothing
                 self.current_velocity_.linear.x += self.smooth_factor_ * delta_vel
                 self.current_velocity_.angular.z = self.target_velocity_.angular.z
-            elif (self.target_velocity_.linear.x < 0):
-                # reached goal
-                self.current_velocity_.linear.x = 0.
-                self.current_velocity_.angular.z = 0.
+            # elif (self.target_velocity_.linear.x < 0):
+            #     # reached goal
+            #     self.current_velocity_.linear.x = 0.
+            #     self.current_velocity_.angular.z = 0.
             else:
                 # decel or constant case
                 self.current_velocity_ = self.target_velocity_

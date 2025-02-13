@@ -2,11 +2,12 @@
 import time
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from nav_msgs.msg import OccupancyGrid, Path, Odometry
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Twist, PoseWithCovarianceStamped
 import numpy as np
 import math
+from nav2_simple_commander.robot_navigator import BasicNavigator
 
 
 class ObstacleExtractor(Node):
@@ -18,25 +19,53 @@ class ObstacleExtractor(Node):
         self.odom_ = Odometry()
         self.occupiedCells = []
         self.flag_ = Bool()
-        self.startTime_ = time.time()
-        self.endTime_ = 0.
+        self.startTime_ = time.time()  # the time to hold the flag signal
+        self.endTime_ = 0.  # the time where obstacles are still there
+        self.firstTime_ = 0.  # the first time when detected obstacles
         self.costmapCoordinates_ = [0, 0]
+        self.last_cmd_ = Twist()
+        self.navigator = BasicNavigator()
 
         self.objflag_pub_ = self.create_publisher(Bool, "/object_detected", 10)
+
+        self.bkwd_pub_ = self.create_publisher(Bool, "/need_backward", 10)
+        self.initialpose_pub_ = self.create_publisher(
+            PoseWithCovarianceStamped, '/initialpose', 10)
+        self.cmd_vel_backward_pub_ = self.create_publisher(
+            Twist, '/cmd_vel_backward', 10)
 
         self.costmap_sub_ = self.create_subscription(
             OccupancyGrid, "/local_costmap/costmap", self.costmapCallback, 10)
         self.costmap_sub_
-
-        # self.globalpath_sub_ = self.create_subscription(
-        #     Path, "/plan", self.pathCallback, 10)
         self.globalpath_sub_ = self.create_subscription(
             Path, "/received_global_plan", self.pathCallback, 10)
         self.globalpath_sub_
-
         self.odom_sub_ = self.create_subscription(
             Odometry, "/odom", self.odomCallback, 10)
         self.odom_sub_
+        self.cmd_vel_sub_ = self.create_subscription(
+            Twist, '/cmd_vel', self.cmdCallback, 10)
+        self.cmd_vel_sub_
+        self.path_feedback_sub_ = self.create_subscription(
+            String, '/task_result', self.feedbackCallback, 10)
+        self.path_feedback_sub_
+
+    def feedbackCallback(self, msg: String):
+        # to reset the path, not tracking when reached goal due to last data
+        if "SUCCEEDED" in msg.data:
+            self.path_ = Path()
+
+    def cmdCallback(self, msg: Twist):
+        # use to save the cmd and send -ve cmd when obstacles hold too long
+        stop_cmd_vel_ = Twist()
+        stop_cmd_vel_.linear.x = 0.
+        stop_cmd_vel_.linear.y = 0.
+        stop_cmd_vel_.linear.z = 0.
+        stop_cmd_vel_.angular.x = 0.
+        stop_cmd_vel_.angular.y = 0.
+        stop_cmd_vel_.angular.z = 0.
+        if msg != stop_cmd_vel_:
+            self.last_cmd_ = msg
 
     def pathCallback(self, msg: Path):
         self.path_ = msg
@@ -80,6 +109,30 @@ class ObstacleExtractor(Node):
                 self.occupiedCells = []  # reset
             self.flag_.data = True
 
+            obstacleTime = self.endTime_ - self.firstTime_
+            if obstacleTime >= 3.0:
+                pose = PoseWithCovarianceStamped()
+                pose.header.stamp = BasicNavigator().get_clock().now().to_msg()
+                pose.header.frame_id = "map"
+                pose.pose = self.odom_.pose
+                pose.pose.pose.position.x = self.odom_.pose.pose.position.x-0.2
+                # self.initialpose_pub_.publish(pose)
+
+                print('move backward')
+                cmd_vel = self.last_cmd_
+                cmd_vel.linear.x = -0.1
+                self.cmd_vel_backward_pub_.publish(cmd_vel)
+                self.bkwd_pub_.publish(Bool(data=True))
+                time.sleep(3.0)
+                cmd_vel.linear.x = 0.
+                self.cmd_vel_backward_pub_.publish(cmd_vel)
+                self.bkwd_pub_.publish(Bool(data=False))
+
+                # self.get_logger().info("Clear local costmap by re-positioning")
+                # self.navigator.clearGlobalCostmap()
+                # self.navigator.clearLocalCostmap()
+                self.firstTime_ = time.time()
+
             holdTime = self.startTime_ - self.endTime_
             print(f"hold time: {holdTime}")
             if (len(self.occupiedCells) == 0 and holdTime <= 2.):
@@ -93,7 +146,6 @@ class ObstacleExtractor(Node):
             self.objflag_pub_.publish(self.flag_)
             return
 
-        maxDistance = 2  # lookahead distance from robot along the path
         bufferRadius = 0.2  # 0.2 for actual robot
         bufferCells = math.ceil(bufferRadius / resolution)
         obstacleCells = 0
@@ -102,8 +154,9 @@ class ObstacleExtractor(Node):
 
         # The path is updated when the robot pass through.
         # Therefore, in order to cal. the path starting from the head of robot,
-        # need to chop some point at first [3:30]
-        for pose in self.path_.poses[3:30]:
+        # need to chop some point at first [6:30]
+        i = 0
+        for pose in self.path_.poses[6:30]:
             pose: PoseStamped
             posei = math.ceil(
                 (pose.pose.position.y-origin_y_odom)/resolution)
@@ -122,10 +175,12 @@ class ObstacleExtractor(Node):
                                     x = origin_x_odom + cellj * resolution
                                     y = origin_y_odom + celli * resolution
                                     print(
-                                        f"Occupied cell at ({round(x,2)}, {round(y,2)}) on path point {round(pose.pose.position.x,2)},{round(pose.pose.position.y,2)}")
+                                        f"Occupied cell at ({round(x,2)}, {round(y,2)}) on path point {i,round(pose.pose.position.x,2)},{round(pose.pose.position.y,2)}")
+            i += 1
 
         self.flag_.data = obstacleCells > 3
         if (self.flag_.data):
+            self.firstTime_ = time.time()
             self.endTime_ = time.time()  # detected obstacle
             self.occupiedCells = ocCells
             self.get_logger().info("Obstacle detected, sending stop cmd")

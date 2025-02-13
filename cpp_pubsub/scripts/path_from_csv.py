@@ -3,11 +3,12 @@ import rclpy
 from rclpy.node import Node
 import csv
 import math
+from enum import Enum
 import numpy as np
 import tf_transformations
 from nav_msgs.msg import Path, Odometry
-from geometry_msgs.msg import PoseStamped, Twist
-from std_msgs.msg import String, Bool, Int8
+from geometry_msgs.msg import PoseStamped, Twist, PoseWithCovarianceStamped
+from std_msgs.msg import String, Bool, Int16
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from scipy.spatial.distance import euclidean
 from datetime import datetime
@@ -18,11 +19,19 @@ from datetime import datetime
 '''
 
 
+class FixedPathState(Enum):
+    IDLE = 0
+    PROCESSING = 1
+    ERROR = 2
+    SKIP = 3
+
+
 class PathCsvNode(Node):
     def __init__(self):
         super().__init__("path_from_csv_node")
         self.declare_parameter("prefix", "/home/asd/gg_ws/src/cpp_pubsub/")
-        self.declare_parameter("save_path_filename", "path/map3.csv")
+        # change to path prefix name only
+        self.declare_parameter("save_path_filename", "path/map_")
         self.declare_parameter("isNavThroughPoses", False)
         self.declare_parameter("loggingPrefix", "distance_log/")
         self.prefix_ = self.get_parameter("prefix")
@@ -41,10 +50,15 @@ class PathCsvNode(Node):
         self.currentAngle_ = float()
         self.isRecievedOdom = bool(False)
         self.startTime_ = datetime.now()
+        self.state_ = FixedPathState.IDLE
+        self.mapName_ = ""
 
         self.path_feedback_pub_ = self.create_publisher(
             String, "task_result", 10)
         self.goal_pub_ = self.create_publisher(PoseStamped, "fixed_pose", 10)
+        self.buzzer_pub_ = self.create_publisher(Bool, "/buzzer_control", 10)
+        self.initialpose_pub_ = self.create_publisher(
+            PoseWithCovarianceStamped, '/initialpose', 10)
 
         self.odom_sub_ = self.create_subscription(
             Odometry, "odom", self.odomCallback, 10)
@@ -53,9 +67,16 @@ class PathCsvNode(Node):
         self.objflag_sub_ = self.create_subscription(
             Bool, "/object_detected", self.objflagCallback, 10)
         self.mode_sub_ = self.create_subscription(
-            Int8, "/mode", self.modeCallback, 10)
+            Int16, "/mode", self.modeCallback, 10)
         self.angle_sub_ = self.create_subscription(
             Twist, "cmd_vel_tc", self.angleCallback, 10)
+        self.choose_path_sub_ = self.create_subscription(
+            String, "/chosen_path", self.chosenPathCallback, 10)
+        self.change_map_sub_ = self.create_subscription(
+            String, "/change_map", self.changeMapCallback, 10)
+
+    def changeMapCallback(self, msg: String):
+        self.mapName_ = msg.data
 
     def angleCallback(self, msg: Twist):
         self.currentAngle_ = msg.angular.z
@@ -63,15 +84,30 @@ class PathCsvNode(Node):
     def objflagCallback(self, msg: Bool):
         self.objflag_ = msg.data
 
-    def modeCallback(self, msg: Int8):
+    def modeCallback(self, msg: Int16):
         self.mode_ = msg.data
 
-    def odomCallback(self, data: Odometry):
-        self.odom = data
+    def odomCallback(self, msg: Odometry):
+        self.odom = msg
         self.isRecievedOdom = True
 
     def fixedPathSignalCallback(self, data: Bool):
-        self.sendPath(123)
+        if self.state_ == FixedPathState.IDLE:
+            self.sendPath("123")
+        else:
+            self.get_logger().info(
+                "The robot is still in task, please wait for the navigation finished")
+
+    def chosenPathCallback(self, msg: String):
+        print("QQQQQQQQQQQQQQQQQQQQQq")
+        if msg.data == "":  # initialisation
+            print("initialised")
+            return
+        if self.state_ == FixedPathState.IDLE:
+            self.sendPath(msg.data)
+        else:
+            self.get_logger().info(
+                "The robot is still in task, please wait for the navigation finished")
 
     def calDistancePath(self, msg: Path):
         pathLength = 0.
@@ -177,17 +213,32 @@ class PathCsvNode(Node):
             self.get_logger().info("FollowPath started, adjusting initial orientation")
             self.goal_pub_.publish(pose)
 
-    def readPath(self):
-        filepath = self.prefix_.value + self.save_path_filename.value
+    def readPath(self, chosenPath: str):
+        if chosenPath == "123":
+            filepath = self.prefix_.value + self.save_path_filename.value
+        else:
+            filepath = self.prefix_.value + "path/" + \
+                self.mapName_ + "_" + chosenPath + ".csv"
         originCoordinates = []
-        with open(filepath, mode="r") as f:
-            reader = csv.reader(f, delimiter=",")
-            for row in reader:
-                # Skip the header row
-                if row == ["x", "y"]:
-                    continue
-                x, y = map(float, row)
-                originCoordinates.append((x, y))
+        print(filepath)
+        try:
+            with open(filepath, mode="r") as f:
+                reader = csv.reader(f, delimiter=",")
+                for row in reader:
+                    # Skip the header row
+                    if row == ["x", "y"]:
+                        continue
+                    x, y = map(float, row)
+                    originCoordinates.append((x, y))
+        except:
+            print("No such file exist!!!!")
+            self.state_ = FixedPathState.ERROR
+            self.coordinates = []  # reset to not save previous path
+            return
+        if len(originCoordinates) == 0:
+            self.state_ = FixedPathState.SKIP
+            self.coordinates = []  # reset to not save previous path
+            return
 
         self.angle_ = originCoordinates[-1]
         print(self.angle_)
@@ -196,18 +247,29 @@ class PathCsvNode(Node):
         # # must include last point as goal
         # self.coordinates.append(coordinates[-1])
 
-    def sendPath(self, event):
+    def sendPath(self, chosenPath: str):
         if not self.isRecievedOdom:
             print("Odom is not initialised, please try again...")
             return
 
-        print("Received current odom, start following path...")
+        self.readPath(chosenPath)
+        if self.state_ == FixedPathState.ERROR:
+            print("Path does not exist")
+            self.path_feedback_pub_.publish(String(data="INVALID"))
+            self.state_ = FixedPathState.IDLE
+            return
+        elif self.state_ == FixedPathState.SKIP:
+            print("FGFHJKFJYTKYTKTERfddfee")
+            self.path_feedback_pub_.publish(String(data="SUCCEEDED"))
+            return
 
-        self.readPath()
+        print("Received current odom, start following path...")
         navigator = BasicNavigator()
         path_to_path = self.shortestPath()
         if not path_to_path:
             return
+
+        self.state_ = FixedPathState.PROCESSING
 
         goal_poses = []
         for i in range(len(self.afterCoordinates)-1):
@@ -244,6 +306,8 @@ class PathCsvNode(Node):
             navigator.followPath(path_to_path, controller_id="FollowPath")
             goal_poses = path_to_path.poses  # update poses
 
+        self.buzzer_pub_.publish(Bool(data=True))
+
         # publish end goal for adjusting orientation
 
         while not navigator.isTaskComplete():
@@ -254,7 +318,8 @@ class PathCsvNode(Node):
 
         if not self.isNavThroughPoses.value:
             # only handle task failed due to obstacle detected or controller in idle mode
-            while result == TaskResult.FAILED and (self.objflag_ or self.mode_ == 0):
+            # while result == TaskResult.FAILED and (self.objflag_ or self.mode_ == 0):
+            while result == TaskResult.FAILED:
                 self.get_logger().info("FollowPath failed, sending path again...")
                 path = Path()
                 path.header.frame_id = "map"
@@ -271,7 +336,13 @@ class PathCsvNode(Node):
                 # while not navigator.isTaskComplete():
                 #     pass
                 navigator.clearLocalCostmap()
-                # navigator.clearGlobalCostmap()
+                # pose = PoseWithCovarianceStamped()
+                # pose.header.stamp = BasicNavigator().get_clock().now().to_msg()
+                # pose.header.frame_id = "map"
+                # pose.pose = self.odom.pose
+                # pose.pose.pose.position.x = self.odom.pose.pose.position.x-0.2
+                # self.initialpose_pub_.publish(pose)
+                # self.get_logger().info("Clear local costmap by re-positioning")
 
         if result == TaskResult.SUCCEEDED:
             task_result.data = "SUCCEEDED"
@@ -284,10 +355,12 @@ class PathCsvNode(Node):
             task_result.data = "INVALID"
 
         self.path_feedback_pub_.publish(task_result)
+        self.buzzer_pub_.publish(Bool(data=False))
         self.get_logger().info(f"Task result: {task_result.data}")
+        self.state_ = FixedPathState.IDLE
 
 
-def main(args=None):
+def ouob(args=None):
     rclpy.init(args=args)
     node = PathCsvNode()
     rclpy.spin(node)
@@ -296,4 +369,4 @@ def main(args=None):
 
 
 if __name__ == "__main__":
-    main()
+    ouob()

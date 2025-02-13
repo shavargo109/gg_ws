@@ -16,11 +16,11 @@ class MapPathNode(Node):
     def __init__(self):
         super().__init__('map_path_node')
         self.declare_parameter(
-            'image_path', '/home/asd/Robotics_ws/src/map_find_path/maps/map_LG2_indoor_0616_2_2023-06-16-12-23-40_2.jpg')
+            'image_path', '/home/asd/gg_ws/src/cpp_pubsub/maps/map.png')
         self.declare_parameter(
-            'yaml_path', '/home/asd/Robotics_ws/src/map_find_path/maps/map_LG2_indoor_0616_2_2023-06-16-12-23-40.yaml')
+            'yaml_path', '/home/asd/gg_ws/src/cpp_pubsub/maps/map.yaml')
         self.declare_parameter(
-            'savepath_filename', '/home/asd/Robotics_ws/src/map_find_path/path/0402_LG2_slope_path1')
+            'savepath_filename', '/home/asd/gg_ws/src/cpp_pubsub/path/map')
         self.declare_parameter('first_pixels', [160, 194])
         self.image_path_ = self.get_parameter('image_path')
         self.yaml_path_ = self.get_parameter('yaml_path')

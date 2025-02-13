@@ -17,3 +17,4 @@ cpp_pubsub/maps/map_0223_LG2_indoor.png
 cpp_pubsub/path/map_0223_LG2_indoor.csv
 cpp_pubsub/path/map3.csv
 cpp_pubsub/scripts/sub.py
+cpp_pubsub/scripts/position.py
