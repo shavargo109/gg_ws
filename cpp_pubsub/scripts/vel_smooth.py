@@ -4,6 +4,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Int16, String, Bool
+import time
 
 
 class VelocitySmootherNode(Node):
@@ -15,6 +16,7 @@ class VelocitySmootherNode(Node):
         self.mode_ = int()
         self.obj_flag_ = bool()
         self.bkwd_flag_ = bool()
+        self.para_flag_ = bool()
         self.smooth_factor_ = 0.05  # Adjust smoothing factor as needed
 
         self.current_velocity_ = Twist()
@@ -59,7 +61,15 @@ class VelocitySmootherNode(Node):
             Twist, 'cmd_vel_backward', self.cmd_vel_backward_callback, 10)
         self.cmd_vel_backward_sub_
 
+        self.autodockfinish_sub_ = self.create_subscription(
+            Bool, '/autodockfinish', self.autodockfinishcallback, 10)
+        self.autodockfinish_sub_
+
         self.cmd_vel_pub_ = self.create_publisher(Twist, 'cmd_vel', 10)
+
+    def autodockfinishcallback(self, msg: Bool):
+        if msg.data:
+            self.para_flag_ = True
 
     def result_callback(self, data: String):
         if ('SUCCEEDED' in data.data):
@@ -91,7 +101,20 @@ class VelocitySmootherNode(Node):
 
     def smooth_velocity(self):
         # if (self.mode_ == 2 and not self.obj_flag_):
-        if self.bkwd_flag_:
+        if self.para_flag_:
+            print('finished recharging, parallel move out...')
+            cmd_vel = Twist()
+            cmd_vel.linear.x = -0.2
+            cmd_vel.linear.y = 0.
+            cmd_vel.linear.z = 0.
+            cmd_vel.angular.x = 0.
+            cmd_vel.angular.y = 0.
+            cmd_vel.angular.z = 0.
+            self.cmd_vel_pub_.publish(cmd_vel)
+            time.sleep(4.0)
+            self.cmd_vel_pub_.publish(self.stop_cmd_vel_)
+            self.para_flag_ = False
+        elif self.bkwd_flag_:
             self.cmd_vel_pub_.publish(self.backward_velocity_)
             print("Received bkwd vel from costmap detect, First priority!")
             return
