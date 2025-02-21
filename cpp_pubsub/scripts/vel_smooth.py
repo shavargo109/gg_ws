@@ -72,23 +72,15 @@ class VelocitySmootherNode(Node):
             self.para_flag_ = True
 
     def result_callback(self, data: String):
-        if ('SUCCEEDED' in data.data):
-            cmd_vel = Twist()
-            cmd_vel.linear.x = 0.
-            cmd_vel.linear.y = 0.
-            cmd_vel.linear.z = 0.
-            cmd_vel.angular.x = 0.
-            cmd_vel.angular.y = 0.
-            cmd_vel.angular.z = 0.
+        if 'SUCCEEDED' in data.data:
             print("Goal reached, sending stop command!")
-            self.cmd_vel_pub_.publish(cmd_vel)
+            self.cmd_vel_pub_.publish(self.stop_cmd_vel_)
 
     def cmd_vel_backward_callback(self, data: Twist):
         self.backward_velocity_ = data
 
     def raw_cmd_vel_callback(self, data: Twist):
         self.target_velocity_ = data
-        # self.cmd_vel_pub_.publish(data)
 
     def cmd_vel_object_callback(self, data: Bool):
         self.obj_flag_ = data.data
@@ -100,26 +92,25 @@ class VelocitySmootherNode(Node):
         self.mode_ = data.data
 
     def smooth_velocity(self):
-        # if (self.mode_ == 2 and not self.obj_flag_):
-        if self.para_flag_:
+        if self.mode_ != 2:
+            print("not in automode!")
+            self.current_velocity_ = self.stop_cmd_vel_
+        elif self.para_flag_:
             print('finished recharging, parallel move out...')
             cmd_vel = Twist()
+            cmd_vel = self.stop_cmd_vel_
             cmd_vel.linear.x = -0.2
-            cmd_vel.linear.y = 0.
-            cmd_vel.linear.z = 0.
-            cmd_vel.angular.x = 0.
-            cmd_vel.angular.y = 0.
-            cmd_vel.angular.z = 0.
             self.cmd_vel_pub_.publish(cmd_vel)
             time.sleep(4.0)
             self.cmd_vel_pub_.publish(self.stop_cmd_vel_)
             self.para_flag_ = False
         elif self.bkwd_flag_:
-            self.cmd_vel_pub_.publish(self.backward_velocity_)
             print("Received bkwd vel from costmap detect, First priority!")
-            return
-        elif (not self.obj_flag_):
-            # print('xd')
+            self.current_velocity_ = self.backward_velocity_
+        elif self.obj_flag_:
+            print("Obstacled detected, sending stop command!!")
+            self.current_velocity_ = self.stop_cmd_vel_
+        else:
             if (self.target_velocity_.linear.x > 0.5):
                 # cap the vel at 0.5
                 self.target_velocity_.linear.x = 0.5
@@ -132,21 +123,9 @@ class VelocitySmootherNode(Node):
                 # need smoothing
                 self.current_velocity_.linear.x += self.smooth_factor_ * delta_vel
                 self.current_velocity_.angular.z = self.target_velocity_.angular.z
-            # elif (self.target_velocity_.linear.x < 0):
-            #     # reached goal
-            #     self.current_velocity_.linear.x = 0.
-            #     self.current_velocity_.angular.z = 0.
             else:
                 # decel or constant case
                 self.current_velocity_ = self.target_velocity_
-        else:
-            if (self.obj_flag_):
-                print("Obstacled detected, sending stop command!!")
-            else:
-                print("not in automode!")
-
-            self.current_velocity_.linear.x = 0.
-            self.current_velocity_.angular.z = 0.
 
         self.cmd_vel_pub_.publish(self.current_velocity_)
 

@@ -29,7 +29,8 @@ class FixedPathState(Enum):
 class PathCsvNode(Node):
     def __init__(self):
         super().__init__("path_from_csv_node")
-        self.declare_parameter("prefix", "/home/asd/gg_ws/src/cpp_pubsub/")
+        self.declare_parameter(
+            "prefix", "/home/asd/gg_ws/src/cpp_pubsub/")  # CHANGE
         # change to path prefix name only
         self.declare_parameter("save_path_filename", "path/map_")
         self.declare_parameter("isNavThroughPoses", False)
@@ -259,8 +260,9 @@ class PathCsvNode(Node):
             self.state_ = FixedPathState.IDLE
             return
         elif self.state_ == FixedPathState.SKIP:
-            print("FGFHJKFJYTKYTKTERfddfee")
+            print("Recharge action")
             self.path_feedback_pub_.publish(String(data="SUCCEEDED"))
+            self.state_ = FixedPathState.IDLE
             return
 
         print("Received current odom, start following path...")
@@ -318,8 +320,8 @@ class PathCsvNode(Node):
 
         if not self.isNavThroughPoses.value:
             # only handle task failed due to obstacle detected or controller in idle mode
-            # while result == TaskResult.FAILED and (self.objflag_ or self.mode_ == 0):
-            while result == TaskResult.FAILED:
+            while result == TaskResult.FAILED and (self.objflag_ or self.mode_ == 0):
+                # while result == TaskResult.FAILED:
                 self.get_logger().info("FollowPath failed, sending path again...")
                 path = Path()
                 path.header.frame_id = "map"
@@ -332,17 +334,7 @@ class PathCsvNode(Node):
                 result = navigator.getResult()
                 print(result)
                 self.get_logger().info("Clearing local costmap due to failed in FollowPath")
-                # navigator.wait(duration=1)
-                # while not navigator.isTaskComplete():
-                #     pass
                 navigator.clearLocalCostmap()
-                # pose = PoseWithCovarianceStamped()
-                # pose.header.stamp = BasicNavigator().get_clock().now().to_msg()
-                # pose.header.frame_id = "map"
-                # pose.pose = self.odom.pose
-                # pose.pose.pose.position.x = self.odom.pose.pose.position.x-0.2
-                # self.initialpose_pub_.publish(pose)
-                # self.get_logger().info("Clear local costmap by re-positioning")
 
         if result == TaskResult.SUCCEEDED:
             task_result.data = "SUCCEEDED"

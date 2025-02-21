@@ -5,7 +5,7 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from nav_msgs.msg import Path, Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
-from std_msgs.msg import String, Bool, Float32
+from std_msgs.msg import String, Bool, Float32, Int32
 from nav2_simple_commander.robot_navigator import BasicNavigator
 import csv
 from command_msgs.msg import Command
@@ -25,7 +25,8 @@ class UIHandleNode(Node):
         self.mapData_ = {'map': [-2., -0.5], 'LG2_downsample_005': [0., 0.]}
         self.position_ = []
         self.prefix_ = "/home/asd/gg_ws/src/cpp_pubsub/"  # CHANGE
-        self.asd_ = ''
+        self.location_ = ''
+        self.battery_ = 0
         self.best_error_ = 0.
         self.best_pose_ = None
         self.candidate_poses_ = []
@@ -75,10 +76,12 @@ class UIHandleNode(Node):
             Bool, '/mic_control', self.micControlCallback, 10)
         self.task_result_sub_ = self.create_subscription(
             String, '/task_result', self.taskResultCallback, 10)
+        self.battery_sub_ = self.create_subscription(
+            Int32, '/mini_etransporter/battery_mode', self.batteryCallback, 10)
 
     def findBestPose(self, x: float, y: float):
         """Iterate through candidate poses to find the best initial pose."""
-        self.candidate_poses_ = []
+        self.candidate_poses_ = list()
         self.current_index_ = 0
         self.best_error_ = 0.
         self.best_pose_ = None
@@ -119,10 +122,10 @@ class UIHandleNode(Node):
         # Allow some time for the localization system to update before checking error
         self.current_index_ += 1
 
+    def batteryCallback(self, msg: Int32):
+        self.battery_ = msg.data
+
     def taskResultCallback(self, msg: String):
-        '''
-        # XDD
-        '''
         if ('SUCCEEDED' in msg.data):
             response = Command()
             response.command = 'arrive'
@@ -155,13 +158,13 @@ class UIHandleNode(Node):
             path = ''
             for location in self.location_code_:
                 if self.location_code_[location] == msg.value:
-                    path = self.asd_+location
+                    path = self.location_+location
                     self.target_pub_.publish(String(data=location))
                     # to make sure data is published due to lack of processing power of pc
-                    time.sleep(1.0)
+                    # time.sleep(1.0)
                     # self.target_pub_.publish(String(data=location))
-
-            if self.asd_:
+            time.sleep(1.0)
+            if self.location_:
                 response.value = 0
             self.chosen_path_pub_.publish(String(data=path))
             speechControl.data = 'navigation'
@@ -169,25 +172,28 @@ class UIHandleNode(Node):
         elif 'location' in msg.command:
             response.value = -1
             for location in self.location_code_:
-                if location == self.asd_:
+                if location == self.location_:
                     response.value = self.location_code_[location]
 
         elif 'followme_disable' in msg.command:
+            # TODO
             response.value = 0
             speechControl.data = 'followme_disable'
 
         elif 'followme' in msg.command:
+            # TODO
             response.value = 0
             speechControl.data = 'followme'
 
         elif 'remainingpower' in msg.command:
-            response.value = 100
+            response.value = self.battery_
             speechControl.data = 'remainingpower'
 
         elif 'powercharging' in msg.command:
-            self.startAutodock()
             response.value = 0
             speechControl.data = 'powercharging'
+            path = self.location_+'X'
+            self.chosen_path_pub_.publish(String(data=path))
 
         else:
             print('Invalid command')
@@ -201,6 +207,7 @@ class UIHandleNode(Node):
     def autodockCallback(self, msg: Bool):
         if msg.data:
             print('Received autodocking singal')
+            time.sleep(5.0)
             self.startAutodock()
 
     def startAutodock(self):
@@ -239,12 +246,12 @@ class UIHandleNode(Node):
         #         break
 
     def odomCallback(self, msg: Odometry):
-        self.asd_ = ""
+        self.location_ = ""
         for pose in self.position_:
             if ((msg.pose.pose.position.x-1 <= pose[1] <= msg.pose.pose.position.x+1) and (msg.pose.pose.position.y-1 <= pose[2] <= msg.pose.pose.position.y+1)):
-                self.asd_ = pose[0]
+                self.location_ = pose[0]
 
-        self.current_position_pub_.publish(String(data=self.asd_))
+        self.current_position_pub_.publish(String(data=self.location_))
 
     def changeMapCallback(self, msg: String):
         if msg.data == "":
@@ -280,7 +287,6 @@ class UIHandleNode(Node):
 
 
 def ouob(args=None):
-
     rclpy.init(args=args)
     node = UIHandleNode()
     executor = MultiThreadedExecutor()
@@ -291,11 +297,6 @@ def ouob(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
-    # rclpy.init(args=args)
-    # node = UIHandleNode()
-    # rclpy.spin(node)
-    # node.destroy_node()
-    # rclpy.shutdown()
 
 
 if __name__ == "__main__":
