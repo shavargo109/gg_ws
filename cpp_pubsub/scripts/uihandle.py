@@ -22,16 +22,17 @@ a code that handle all topic from the ui and chatbot
 class UIHandleNode(Node):
     def __init__(self):
         super().__init__('ui_handle_node')
-        self.mapData_ = {'map': [-2., -0.5], 'LG2_downsample_005': [0., 0.]}
         self.position_ = []
+        # self.prefix_ = "/home/tc4801/asd2_ws/src/cpp_pubsub/"  # CHANGE
         self.prefix_ = "/home/asd/gg_ws/src/cpp_pubsub/"  # CHANGE
         self.location_ = ''
         self.battery_ = 0
-        self.best_error_ = 0.
+        self.best_error_ = float('inf')
         self.best_pose_ = None
         self.candidate_poses_ = []
         self.current_index_ = 0
         self.timer_ = None
+        self.last_command_ = ''
         self.orientations_ = [
             (0.0, 1.0),       # [z, w] for (0, 0, 0, 1)
             (0.707, 0.707),   # +90 degrees
@@ -83,7 +84,7 @@ class UIHandleNode(Node):
         """Iterate through candidate poses to find the best initial pose."""
         self.candidate_poses_ = list()
         self.current_index_ = 0
-        self.best_error_ = 0.
+        self.best_error_ = float('inf')
         self.best_pose_ = None
         for z, w in self.orientations_:
             poseMsg = PoseWithCovarianceStamped()
@@ -126,7 +127,7 @@ class UIHandleNode(Node):
         self.battery_ = msg.data
 
     def taskResultCallback(self, msg: String):
-        if ('SUCCEEDED' in msg.data):
+        if 'SUCCEEDED' in msg.data and 'navigation' in self.last_command_:
             response = Command()
             response.command = 'arrive'
             response.value = 0
@@ -142,7 +143,7 @@ class UIHandleNode(Node):
 
     def poseErrorCallback(self, msg: Float32):
         # Check if the current error is better than the previous best error
-        if self.current_index_ > 0 and msg.data > self.best_error_:
+        if self.current_index_ > 0 and msg.data < self.best_error_:
             self.best_error_ = msg.data
             self.best_pose_ = self.candidate_poses_[self.current_index_ - 1]
             self.get_logger().info(
@@ -152,6 +153,7 @@ class UIHandleNode(Node):
         response = Command()
         response.command = msg.command
         speechControl = String()
+        self.last_command_ = msg.command
         print(f"Received command '{msg.command}'")
         if 'navigation' in msg.command:
             response.value = 1
@@ -174,27 +176,22 @@ class UIHandleNode(Node):
             for location in self.location_code_:
                 if location == self.location_:
                     response.value = self.location_code_[location]
-
         elif 'followme_disable' in msg.command:
             # TODO
             response.value = 0
             speechControl.data = 'followme_disable'
-
         elif 'followme' in msg.command:
             # TODO
             response.value = 0
             speechControl.data = 'followme'
-
         elif 'remainingpower' in msg.command:
             response.value = self.battery_
             speechControl.data = 'remainingpower'
-
         elif 'powercharging' in msg.command:
             response.value = 0
             speechControl.data = 'powercharging'
             path = self.location_+'X'
             self.chosen_path_pub_.publish(String(data=path))
-
         else:
             print('Invalid command')
             return
@@ -218,9 +215,13 @@ class UIHandleNode(Node):
 
     def feedbackCallback(self, feedback_msg):
         feedback = feedback_msg.feedback
+        print(feedback.state)
         if feedback.state == 1:
             print('Autodock arrived!!!')
             self.autodock_arrived_pub_.publish(Bool(data=True))
+        elif "aborted" in feedback.status:
+            print("Autodock aborted, cannot trace the marker")
+            self.autodock_arrived_pub_.publish(Bool(data=False))
 
     def positionCallback(self, msg: String):
         if msg.data == "":
@@ -264,11 +265,13 @@ class UIHandleNode(Node):
         self.readcsv(msg.data)
         BasicNavigator().changeMap(map_filepath=filepath)
 
-        pcdprefix = "/home/asd/slam/pcd/"  # CHANGE
+        # pcdprefix = "/home/tc4801/catkin_ws/src/hdl_localization/data/"  # CHANGE
+        pcdprefix = "/home/asd/gg_ws/src/cpp_pubsub/maps/map_pcd/"  # CHANGE
         prefixfilepath = pcdprefix+msg.data+".pcd"
         self.map_request_pub_.publish(String(data=prefixfilepath))
 
     def readcsv(self, mapname: str):
+        # filepath = "/home/tc4801/asd2_ws/src/cpp_pubsub/position/"+mapname+".csv"  # CHANGE
         filepath = "/home/asd/gg_ws/src/cpp_pubsub/position/"+mapname+".csv"  # CHANGE
         self.position_ = []  # reset
         try:

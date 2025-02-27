@@ -12,6 +12,7 @@ from std_msgs.msg import String, Bool, Int16
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from scipy.spatial.distance import euclidean
 from datetime import datetime
+from rclpy.executors import MultiThreadedExecutor
 
 '''
     read path from csv, compute path using nav2 service
@@ -84,6 +85,7 @@ class PathCsvNode(Node):
 
     def objflagCallback(self, msg: Bool):
         self.objflag_ = msg.data
+        print(f'Object detected: {self.objflag_}')
 
     def modeCallback(self, msg: Int16):
         self.mode_ = msg.data
@@ -320,8 +322,9 @@ class PathCsvNode(Node):
 
         if not self.isNavThroughPoses.value:
             # only handle task failed due to obstacle detected or controller in idle mode
-            while result == TaskResult.FAILED and (self.objflag_ or self.mode_ == 0):
-                # while result == TaskResult.FAILED:
+            # while result == TaskResult.FAILED and (self.objflag_ or self.mode_ == 0):
+            while result == TaskResult.FAILED:
+                print(self.objflag_)
                 self.get_logger().info("FollowPath failed, sending path again...")
                 path = Path()
                 path.header.frame_id = "map"
@@ -355,9 +358,21 @@ class PathCsvNode(Node):
 def ouob(args=None):
     rclpy.init(args=args)
     node = PathCsvNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
+
+    try:
+        executor.spin()
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+# def ouob(args=None):
+#     rclpy.init(args=args)
+#     node = PathCsvNode()
+#     rclpy.spin(node)
+#     node.destroy_node()
+#     rclpy.shutdown()
 
 
 if __name__ == "__main__":

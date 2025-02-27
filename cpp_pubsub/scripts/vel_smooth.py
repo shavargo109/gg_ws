@@ -96,20 +96,26 @@ class VelocitySmootherNode(Node):
             print("not in automode!")
             self.current_velocity_ = self.stop_cmd_vel_
         elif self.para_flag_:
+        # if self.para_flag_:
             print('finished recharging, parallel move out...')
             cmd_vel = Twist()
             cmd_vel = self.stop_cmd_vel_
             cmd_vel.linear.x = -0.2
             self.cmd_vel_pub_.publish(cmd_vel)
             time.sleep(4.0)
-            self.cmd_vel_pub_.publish(self.stop_cmd_vel_)
+            self.current_velocity_.linear.x = 0.
+            self.current_velocity_.angular.z = 0.
+            self.cmd_vel_pub_.publish(self.current_velocity_)
             self.para_flag_ = False
+            return
         elif self.bkwd_flag_:
             print("Received bkwd vel from costmap detect, First priority!")
             self.current_velocity_ = self.backward_velocity_
         elif self.obj_flag_:
-            print("Obstacled detected, sending stop command!!")
-            self.current_velocity_ = self.stop_cmd_vel_
+            self.get_logger().info('Obstacle detected, sending stop command!')
+            # print("Obstacled detected, sending stop command!!")
+            self.current_velocity_.linear.x = 0.
+            self.current_velocity_.angular.z = 0.
         else:
             if (self.target_velocity_.linear.x > 0.5):
                 # cap the vel at 0.5

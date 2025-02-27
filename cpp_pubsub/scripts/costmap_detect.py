@@ -53,6 +53,7 @@ class ObstacleExtractor(Node):
     def feedbackCallback(self, msg: String):
         # to reset the path, not tracking when reached goal due to last data
         if "SUCCEEDED" in msg.data:
+            print("SUCCEEDED, reset path")
             self.path_ = Path()
 
     def cmdCallback(self, msg: Twist):
@@ -118,15 +119,15 @@ class ObstacleExtractor(Node):
                 pose.pose.pose.position.x = self.odom_.pose.pose.position.x-0.2
                 # self.initialpose_pub_.publish(pose)
 
-                print('move backward')
-                cmd_vel = self.last_cmd_
-                cmd_vel.linear.x = -0.1
-                self.cmd_vel_backward_pub_.publish(cmd_vel)
-                self.bkwd_pub_.publish(Bool(data=True))
-                time.sleep(3.0)
-                cmd_vel.linear.x = 0.
-                self.cmd_vel_backward_pub_.publish(cmd_vel)
-                self.bkwd_pub_.publish(Bool(data=False))
+                # print('move backward')
+                # cmd_vel = self.last_cmd_
+                # cmd_vel.linear.x = -0.1
+                # self.cmd_vel_ _pub_.publish(cmd_vel)
+                # self.bkwd_pub_.publish(Bool(data=True))
+                # time.sleep(3.0)
+                # cmd_vel.linear.x = 0.
+                # self.cmd_vel_backward_pub_.publish(cmd_vel)
+                # self.bkwd_pub_.publish(Bool(data=False))
 
                 # self.get_logger().info("Clear local costmap by re-positioning")
                 # self.navigator.clearGlobalCostmap()
@@ -144,6 +145,7 @@ class ObstacleExtractor(Node):
             elif (len(self.occupiedCells) == 0):
                 self.flag_.data = False
             self.objflag_pub_.publish(self.flag_)
+            print(f'published flag {self.flag_.data}')
             return
 
         bufferRadius = 0.2  # 0.2 for actual robot
