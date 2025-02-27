@@ -15,7 +15,10 @@ import os
 
 from autodock_interfaces.action import AutoDocking
 '''
-a code that handle all topic from the ui and chatbot
+    received location and command from chatbot,
+    publish the path to navigator and initial pose
+    and publish the current position
+    handle all topic from UI and chatbot
 '''
 
 

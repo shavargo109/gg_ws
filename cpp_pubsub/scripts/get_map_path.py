@@ -11,7 +11,10 @@ from PIL import Image
 from scipy.spatial.distance import euclidean
 from nav2_simple_commander.robot_navigator import BasicNavigator
 
-
+'''
+    read map image and yaml file, extract red pixels, find shortest path
+    and publish the path
+'''
 class MapPathNode(Node):
     def __init__(self):
         super().__init__('map_path_node')

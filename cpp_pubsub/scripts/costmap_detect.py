@@ -9,6 +9,10 @@ import numpy as np
 import math
 from nav2_simple_commander.robot_navigator import BasicNavigator
 
+'''
+    received local costmap and global path, detect obstacles on path
+    and send stop signal to navigator
+'''
 
 class ObstacleExtractor(Node):
     def __init__(self):
