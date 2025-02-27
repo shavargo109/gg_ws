@@ -23,6 +23,7 @@ find_package(std_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(custom_msg_d REQUIRED)  
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
@@ -71,6 +72,10 @@ install(PROGRAMS
   scripts/path_from_csv.py
   scripts/obstacle_detect.py
   scripts/costmap_detect.py
+  scripts/position.py
+  scripts/testdd.py
+  scripts/beep.py
+  scripts/uihandle.py  
   
   DESTINATION lib/${PROJECT_NAME}
 )
